@@ -2127,9 +2127,7 @@ color: var(--text-color);
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
-    <script>
+    <script src="https://telegram.org/js/telegram-web-app.js">
 
         // =========================
         // Premium status UI (visual only)
@@ -2205,6 +2203,33 @@ color: var(--text-color);
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
         const API_URL = 'https://loving-healing-production.up.railway.app' 
+
+
+// --- Telegram initData header for ALL API requests ---
+function getTelegramInitData(){
+    try{ return (window.Telegram && Telegram.WebApp) ? (Telegram.WebApp.initData || '') : ''; }catch(e){ return ''; }
+}
+
+(function(){
+    const __origFetch = window.fetch ? window.fetch.bind(window) : null;
+    if (!__origFetch) return;
+
+    window.fetch = function(input, init){
+        try{
+            const url = (typeof input === 'string')
+                ? input
+                : (input && typeof input.url === 'string' ? input.url : '');
+            const isApi = typeof url === 'string' && url.startsWith(API_URL);
+            if (isApi){
+                const headers = new Headers((init && init.headers) || {});
+                const initData = getTelegramInitData();
+                if (initData) headers.set('X-Telegram-Init-Data', initData);
+                init = Object.assign({}, init || {}, { headers });
+            }
+        }catch(e){}
+        return __origFetch(input, init);
+    };
+})();
         let userData = null, products = [], cart = [], currentCategory = 'all', currentBrand = 'all';
         let lastPickupChatUrl = null; // deep link to @trippuff with prefilled order text
 
@@ -2217,23 +2242,9 @@ color: var(--text-color);
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-
-function getTelegramInitData(){
-    try { return (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) ? Telegram.WebApp.initData : ''; } catch(e) { return ''; }
-}
-
-async function apiFetch(url, options = {}) {
-    const opts = options || {};
-    const h = new Headers(opts.headers || {});
-    const initData = getTelegramInitData();
-    if (initData) h.set('X-Telegram-Init-Data', initData);
-    opts.headers = h;
-    return window.fetch(url, opts);
-}
-
         async function initApp() {
             try {
-                const initData = Telegram.WebApp.initData;
+                const initData = getTelegramInitData();
                 if (!initData) { alert('Откройте в Telegram!'); return; }
                 Telegram.WebApp.expand();
                 try {
@@ -2268,11 +2279,11 @@ async function apiFetch(url, options = {}) {
                 if (userData.is_admin) document.getElementById('admin-fab').style.display = 'flex';
             } catch (error) { console.error(error); }
         }
-        async function checkUserRegistration(userId) {
+        async function checkUserRegistration() {
             // retry helps when Railway wakes up or user opens app on weak network
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    const res = await apiFetch(`${API_URL}/api/user/me`);
+                    const res = await fetch(`${API_URL}/api/me`);
                     if (res.ok) return await res.json();
                     if (res.status === 404) return null;
                 } catch (e) {}
@@ -2296,38 +2307,31 @@ async function apiFetch(url, options = {}) {
             return 'Пользователь';
         }
 
-        
-async function upsertTelegramUser() {
-    // Server derives telegram_id/username/nickname from validated initData (X-Telegram-Init-Data)
-    try {
-        for (let attempt = 0; attempt < 3; attempt++) {
+        async function upsertTelegramUser() {
             try {
-                const res = await apiFetch(`${API_URL}/api/register`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && data && data.success) return data.user;
-            } catch (e) {}
-            await sleep(250 * (attempt + 1));
+                const tgUser = Telegram.WebApp.initDataUnsafe?.user;
+                if (!tgUser?.id) return null;
+                const username = (tgUser.username || '').toString().trim().replace(/^@/, '');
+                const nickname = buildNicknameFromTelegram(tgUser);
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        const res = await fetch(`${API_URL}/api/register`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ username, nickname })
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok && data && data.success) return data.user;
+                        // if server returned something unexpected, retry a bit
+                    } catch (e) {}
+                    await sleep(250 * (attempt + 1));
+                }
+            } catch(e) {}
+            return null;
         }
-    } catch(e) {}
-    return null;
-}
-function switchTab(tab) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    const panel = document.getElementById(`${tab}-tab`);
-    if (panel) panel.classList.add('active');
-    try {
-        const btn = (window.event && window.event.target) ? window.event.target : null;
-        if (btn && btn.classList && btn.classList.contains('tab-btn')) btn.classList.add('active');
-    } catch(e) {}
-    if (tab === 'catalog') loadCatalog();
-}
-        async function fetchCart() { if (!userData) return; try { const res = await apiFetch(`${API_URL}/api/cart`); cart = await res.json(); updateCartBadge(); if (document.getElementById('catalog-tab').classList.contains('active')) filterProducts(); } catch (e) {} }
-        async function loadCatalog() { const container = document.getElementById('products-container'); if (cart.length === 0) await fetchCart(); if (products.length === 0) { try { const res = await apiFetch(`${API_URL}/api/products`); products = await res.json(); displayProducts(products); buildBrandFilter(); } catch (e) { container.innerHTML = '<p>Ошибка</p>'; } } else displayProducts(products); }
+        function switchTab(tab) { document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); document.getElementById(`${tab}-tab`).classList.add('active'); event.target.classList.add('active'); if (tab === 'catalog') loadCatalog(); }
+        async function fetchCart() { if (!userData) return; try { const res = await fetch(`${API_URL}/api/me/cart`); cart = await res.json(); updateCartBadge(); if (document.getElementById('catalog-tab').classList.contains('active')) filterProducts(); } catch (e) {} }
+        async function loadCatalog() { const container = document.getElementById('products-container'); if (cart.length === 0) await fetchCart(); if (products.length === 0) { try { const res = await fetch(`${API_URL}/api/products`); products = await res.json(); displayProducts(products); buildBrandFilter(); } catch (e) { container.innerHTML = '<p>Ошибка</p>'; } } else displayProducts(products); }
 
                 function escHtml(s){
             return (s === null || s === undefined) ? '' : String(s)
@@ -2442,7 +2446,7 @@ function getManufacturerFromName(name){
 
             // Backend guard (source of truth)
             try {
-                const res = await apiFetch(`${API_URL}/api/cart/add`, {
+                const res = await fetch(`${API_URL}/api/cart/add`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ productId: id })
@@ -2467,7 +2471,7 @@ function getManufacturerFromName(name){
             }
         }
         async function changeQtyFromCatalog(id, chg) { if (chg === 1) await addToCart(id); else await removeFromCart(id); }
-        async function removeFromCart(id, all = false) { try { await apiFetch(`${API_URL}/api/cart/remove`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ productId: id, removeAll: all }) }); await fetchCart(); if (document.getElementById('cart-modal').classList.contains('active')) openCart(); } catch (e) {} }
+        async function removeFromCart(id, all = false) { try { await fetch(`${API_URL}/api/cart/remove`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ productId: id, removeAll: all }) }); await fetchCart(); if (document.getElementById('cart-modal').classList.contains('active')) openCart(); } catch (e) {} }
         function calcCartSubtotal() {
             return cart.reduce((sum, i) => sum + (parseFloat(i.price) * i.quantity), 0);
         }
@@ -2547,7 +2551,7 @@ function getManufacturerFromName(name){
             }
 
             try {
-                const res = await apiFetch(`${API_URL}/api/promo/validate`, {
+                const res = await fetch(`${API_URL}/api/promo/validate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code })
@@ -2629,10 +2633,12 @@ function getManufacturerFromName(name){
 
         async function submitOrder() {
             try {
-                const res = await apiFetch(`${API_URL}/api/order`, {
+                const res = await fetch(`${API_URL}/api/order`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ // доставка отключена — выдачу уточняем в чате
+                    body: JSON.stringify({
+                        userId: userData.telegram_id,
+                        // доставка отключена — выдачу уточняем в чате
                         address: '',
                         comment: '',
                         promo_code: appliedPromo?.code || '',
@@ -2667,7 +2673,7 @@ function getManufacturerFromName(name){
                     try { if (typeof loadCatalog === 'function') await loadCatalog(); } catch (e) {}
 
                     // refresh user points/profile data
-                    try { userData = await checkUserRegistration(userData.telegram_id); } catch (e) {}
+                    try { userData = await checkUserRegistration(); } catch (e) {}
                 } else {
                     const msg = document.getElementById('pickup-message');
                     const btn = document.getElementById('pickup-chat-btn');
@@ -2724,7 +2730,7 @@ function getManufacturerFromName(name){
             const content = document.getElementById('faq-content');
             content.innerHTML = '<div class="loading">Загрузка...</div>';
             try {
-                const res = await apiFetch(`${API_URL}/api/faq`);
+                const res = await fetch(`${API_URL}/api/faq`);
                 const faqRaw = await res.json();
 
                 let url = '';
@@ -2779,7 +2785,7 @@ async function openProfile() {
 
     try {
         // подстрахуемся: обновим данные пользователя (баллы могут измениться после заказа)
-        const fresh = await checkUserRegistration(userData.telegram_id);
+        const fresh = await checkUserRegistration();
         if (fresh) {
             userData = fresh;
             const nick2 = (userData.nickname || userData.name || '-');
@@ -2790,7 +2796,7 @@ async function openProfile() {
             document.getElementById('profile-points').textContent = (userData.points !== undefined && userData.points !== null) ? userData.points : 0;
         }
 
-        const res = await apiFetch(`${API_URL}/api/user/me/orders`);
+        const res = await fetch(`${API_URL}/api/me/orders`);
         const orders = await res.json();
 
         if (!Array.isArray(orders) || orders.length === 0) {
@@ -2828,7 +2834,7 @@ async function openProfile() {
             const content = document.getElementById('od-content');
             content.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/user/me/orders`);
+                const res = await fetch(`${API_URL}/api/me/orders`);
                 const orders = await res.json();
                 const o = (Array.isArray(orders) ? orders : []).find(x => x.id === orderId);
                 if (!o) { content.innerHTML = 'Заказ не найден'; return; }
@@ -2907,7 +2913,7 @@ async function openProfile() {
             const container = document.getElementById('admin-stats-container');
             container.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/stats`);
+                const res = await fetch(`${API_URL}/api/admin/stats?userId=${userData.telegram_id}`);
                 const data = await res.json();
                 let expList = data.expensesList.map(e => {
                     const d = new Date(e.created_at).toLocaleDateString('ru-RU', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'});
@@ -2921,7 +2927,7 @@ async function openProfile() {
             const amt = document.getElementById('expense-amount').value;
             const cmt = document.getElementById('expense-comment').value;
             if(!amt) return;
-            await apiFetch(`${API_URL}/api/admin/expense`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ amount: amt, comment: cmt }) });
+            await fetch(`${API_URL}/api/admin/expense`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: userData.telegram_id, amount: amt, comment: cmt }) });
             document.getElementById('expense-amount').value = ''; document.getElementById('expense-comment').value = '';
             openAdminPanel();
         }
@@ -2932,7 +2938,7 @@ async function openProfile() {
             if (!list) return;
             list.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/promos`);
+                const res = await fetch(`${API_URL}/api/admin/promos?userId=${userData.telegram_id}`);
                 const promos = await res.json();
                 if (!Array.isArray(promos) || promos.length === 0) {
                     list.innerHTML = '<p>Промокодов пока нет</p>';
@@ -2966,10 +2972,10 @@ async function openProfile() {
             const pct = document.getElementById('new-promo-percent').value;
             if (!code || !pct) return alert('Укажите код и %');
             try {
-                await apiFetch(`${API_URL}/api/admin/promos`, {
+                await fetch(`${API_URL}/api/admin/promos`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code, discount_percent: pct })
+                    body: JSON.stringify({ userId: userData.telegram_id, code, discount_percent: pct })
                 });
                 document.getElementById('new-promo-code').value = '';
                 document.getElementById('new-promo-percent').value = '';
@@ -2979,10 +2985,10 @@ async function openProfile() {
 
         async function togglePromo(id, isActive) {
             try {
-                await apiFetch(`${API_URL}/api/admin/promos/${id}`, {
+                await fetch(`${API_URL}/api/admin/promos/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_active: isActive })
+                    body: JSON.stringify({ userId: userData.telegram_id, is_active: isActive })
                 });
             } catch(e) {}
         }
@@ -2990,7 +2996,7 @@ async function openProfile() {
         async function deletePromo(id) {
             if (!confirm('Удалить промокод?')) return;
             try {
-                await apiFetch(`${API_URL}/api/admin/promos/${id}`, { method: 'DELETE' });
+                await fetch(`${API_URL}/api/admin/promos/${id}`, { method: 'DELETE', headers: { 'user-id': userData.telegram_id } });
                 loadAdminPromos();
             } catch(e) { alert('Ошибка'); }
         }
@@ -3501,10 +3507,10 @@ async function openProfile() {
                     stock: toInt(p.stock)
                 }));
 
-                const res = await apiFetch(`${API_URL}/api/admin/products/batch`, {
+                const res = await fetch(`${API_URL}/api/admin/products/batch`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ products: productsToUpload })
+                    body: JSON.stringify({ userId: userData.telegram_id, products: productsToUpload })
                 });
 
                 const data = await res.json().catch(() => ({}));
@@ -3630,10 +3636,11 @@ async function openProfile() {
             const ta = document.getElementById('wiz-desc-edit');
             const v = (ta ? ta.value : '').toString();
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/db/products/${wizSelectedId}`, {
+                const res = await fetch(`${API_URL}/api/admin/db/products/${wizSelectedId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
+                        'user-id': userData.telegram_id.toString()
                     },
                     body: JSON.stringify({ description: v })
                 });
@@ -3799,10 +3806,11 @@ async function openProfile() {
             if (card) card.classList.add('uploading');
 
             const formData = new FormData();
+            formData.append('userId', userData.telegram_id);
             formData.append('photo', file);
 
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/product/${wizActiveId}/image`, { method: 'POST', body: formData });
+                const res = await fetch(`${API_URL}/api/admin/product/${wizActiveId}/image`, { method: 'POST', body: formData });
                 const data = await res.json();
                 if (data && data.success) {
                     const prod = (products || []).find(p => p.id === wizActiveId);
@@ -3824,6 +3832,7 @@ async function openProfile() {
 
         async function addNewProduct(ev) {
             const formData = new FormData();
+            formData.append('userId', userData.telegram_id);
             formData.append('category', document.getElementById('new-prod-cat').value);
             formData.append('name', document.getElementById('new-prod-name').value);
             formData.append('description', document.getElementById('new-prod-desc').value);
@@ -3839,7 +3848,7 @@ async function openProfile() {
             const btn = (ev && ev.target) ? ev.target : null;
             if (btn) { btn.textContent = 'Загрузка...'; btn.disabled = true; }
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/product`, { method: 'POST', body: formData });
+                const res = await fetch(`${API_URL}/api/admin/product`, { method: 'POST', body: formData });
                 if (res.ok) {
                     alert('Товар создан!');
 
@@ -3865,7 +3874,7 @@ async function openProfile() {
             const container = document.getElementById('admin-products-list');
             container.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/products`);
+                const res = await fetch(`${API_URL}/api/products`);
                 const prods = await res.json();
                 products = prods;
                 container.innerHTML = prods.map(p => `
@@ -3896,9 +3905,9 @@ async function openProfile() {
             if (!val || val <= 0) return alert('Введите количество');
             const change = direction * val;
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/product/stock`, { 
+                const res = await fetch(`${API_URL}/api/admin/product/stock`, { 
                     method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ productId: id, change: change })
+                    body: JSON.stringify({ userId: userData.telegram_id, productId: id, change: change })
                 });
                 if (res.ok) { input.value = ''; loadAdminProducts(); } else { alert('Ошибка'); }
             } catch(e) { alert('Ошибка сети'); }
@@ -3908,9 +3917,9 @@ async function openProfile() {
             if (ev) ev.stopPropagation();
             if(!confirm('Точно удалить этот товар?')) return;
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/product/${id}`, { 
+                const res = await fetch(`${API_URL}/api/admin/product/${id}`, { 
                     method: 'DELETE', 
-                    headers: { 'Content-Type': 'application/json' } 
+                    headers: { 'Content-Type': 'application/json', 'user-id': userData.telegram_id.toString() } 
                 });
                 if (res.ok) { await loadAdminProducts(); } 
                 else { const data = await res.json(); alert('Ошибка удаления: ' + (data.error || 'Неизвестно')); }
@@ -3962,8 +3971,7 @@ async function openProfile() {
 
         async function refreshProductsFromServer() {
             try {
-                const url = (userData && userData.is_admin) ? `${API_URL}/api/admin/products` : `${API_URL}/api/products`;
-                const res = await apiFetch(url);
+                const res = await fetch(`${API_URL}/api/products`);
                 if (!res.ok) return;
                 products = await res.json();
                 // Keep catalog UI in sync (category + brand filters)
@@ -3991,10 +3999,10 @@ async function openProfile() {
 
             if (btn) { btn.disabled = true; btn.textContent = 'Сохранение...'; }
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/product/${editProductId}`, {
+                const res = await fetch(`${API_URL}/api/admin/product/${editProductId}`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, description, category, brand })
+                    headers: { 'Content-Type': 'application/json', 'user-id': userData.telegram_id.toString() },
+                    body: JSON.stringify({ userId: userData.telegram_id, name, description, category, brand })
                 });
                 if (!res.ok) {
                     const data = await res.json().catch(()=>({}));
@@ -4036,7 +4044,7 @@ async function openProfile() {
             const container = document.getElementById('admin-orders-list');
             container.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/orders?status=${status}`);
+                const res = await fetch(`${API_URL}/api/admin/orders?userId=${userData.telegram_id}&status=${status}`);
                 const orders = await res.json();
                 
                 if(orders.length === 0) { container.innerHTML = 'Нет заказов'; return; }
@@ -4087,7 +4095,7 @@ async function openProfile() {
 
         async function completeOrder(id) {
             if(!confirm('Завершить заказ?')) return;
-            await apiFetch(`${API_URL}/api/admin/order/${id}/done`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
+            await fetch(`${API_URL}/api/admin/order/${id}/done`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: userData.telegram_id }) });
             loadAdminOrders('active');
         }
 
@@ -4164,9 +4172,9 @@ async function openProfile() {
             const total = parseFloat(document.getElementById('edit-order-total').textContent);
             if (currentEditItems.length === 0) return alert('Заказ не может быть пустым');
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/order/${id}`, { 
+                const res = await fetch(`${API_URL}/api/admin/order/${id}`, { 
                     method: 'PUT', headers: {'Content-Type':'application/json'}, 
-                    body: JSON.stringify({ address: addr, comment: cmt, details: currentEditItems, total_price: total }) 
+                    body: JSON.stringify({ userId: userData.telegram_id, address: addr, comment: cmt, details: currentEditItems, total_price: total }) 
                 });
                 if(res.ok) { alert('Заказ обновлен!'); document.getElementById('edit-order-modal').classList.remove('active'); loadAdminOrders('active'); } 
                 else { alert('Ошибка сервера'); }
@@ -4181,7 +4189,7 @@ async function openProfile() {
             const container = document.getElementById('db-view-container');
             container.innerHTML = 'Загрузка...';
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/db/${currentDbTable}`);
+                const res = await fetch(`${API_URL}/api/admin/db/${currentDbTable}?userId=${userData.telegram_id}`);
                 const data = await res.json();
                 if (data.error) return container.innerHTML = 'Ошибка доступа';
                 if (data.length === 0) {
@@ -4287,9 +4295,9 @@ async function openProfile() {
                 : `${API_URL}/api/admin/db/${currentDbTable}`;
 
             try {
-                const res = await apiFetch(url, {
+                const res = await fetch(url, {
                     method: method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'user-id': userData.telegram_id },
                     body: JSON.stringify(payload)
                 });
                 if (res.ok) { alert('Сохранено'); document.getElementById('db-edit-modal').classList.remove('active'); loadDbTable(); } 
@@ -4300,9 +4308,10 @@ async function openProfile() {
         async function deleteDbRecord(id) {
             if(!confirm('Удалить эту запись навсегда?')) return;
             try {
-                const res = await apiFetch(`${API_URL}/api/admin/db/${currentDbTable}/${id}`, {
+                const res = await fetch(`${API_URL}/api/admin/db/${currentDbTable}/${id}`, {
                     method: 'DELETE',
-                    headers: { }});
+                    headers: { 'user-id': userData.telegram_id }
+                });
                 if (res.ok) loadDbTable();
                 else alert('Ошибка удаления');
             } catch(e) { alert('Ошибка сети'); }
