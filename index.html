@@ -2203,33 +2203,6 @@ color: var(--text-color);
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
         const API_URL = 'https://loving-healing-production.up.railway.app' 
-
-
-// --- Telegram initData header for ALL API requests ---
-function getTelegramInitData(){
-    try{ return (window.Telegram && Telegram.WebApp) ? (Telegram.WebApp.initData || '') : ''; }catch(e){ return ''; }
-}
-
-(function(){
-    const __origFetch = window.fetch ? window.fetch.bind(window) : null;
-    if (!__origFetch) return;
-
-    window.fetch = function(input, init){
-        try{
-            const url = (typeof input === 'string')
-                ? input
-                : (input && typeof input.url === 'string' ? input.url : '');
-            const isApi = typeof url === 'string' && url.startsWith(API_URL);
-            if (isApi){
-                const headers = new Headers((init && init.headers) || {});
-                const initData = getTelegramInitData();
-                if (initData) headers.set('X-Telegram-Init-Data', initData);
-                init = Object.assign({}, init || {}, { headers });
-            }
-        }catch(e){}
-        return __origFetch(input, init);
-    };
-})();
         let userData = null, products = [], cart = [], currentCategory = 'all', currentBrand = 'all';
         let lastPickupChatUrl = null; // deep link to @trippuff with prefilled order text
 
@@ -2244,8 +2217,10 @@ function getTelegramInitData(){
 
         async function initApp() {
             try {
-                const initData = getTelegramInitData();
-                if (!initData) { alert('Откройте в Telegram!'); return; }
+                const initData = Telegram.WebApp.initDataUnsafe;
+                const userId = initData?.user?.id;
+                // const userId = 123456789; // Debug
+                if (!userId) { alert('Откройте в Telegram!'); return; }
                 Telegram.WebApp.expand();
                 try {
                     const scheme = Telegram.WebApp.colorScheme;
@@ -2255,7 +2230,7 @@ function getTelegramInitData(){
                     Telegram.WebApp.setHeaderColor('#f6f7fb');
                 }
                 // 1) Try to load user
-                userData = await checkUserRegistration();
+                userData = await checkUserRegistration(userId);
 
                 // 2) Upsert Telegram identity (keeps username/nickname fresh and creates user if missing)
                 const synced = await upsertTelegramUser();
@@ -2264,7 +2239,7 @@ function getTelegramInitData(){
                 // 3) Fallback retry (Railway cold start / transient network)
                 if (!userData) {
                     await sleep(450);
-                    userData = await checkUserRegistration();
+                    userData = await checkUserRegistration(userId);
                 }
                 // restore promo from localStorage
                 try {
@@ -2279,11 +2254,11 @@ function getTelegramInitData(){
                 if (userData.is_admin) document.getElementById('admin-fab').style.display = 'flex';
             } catch (error) { console.error(error); }
         }
-        async function checkUserRegistration() {
+        async function checkUserRegistration(userId) {
             // retry helps when Railway wakes up or user opens app on weak network
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    const res = await fetch(`${API_URL}/api/me`);
+                    const res = await fetch(`${API_URL}/api/user/${userId}`);
                     if (res.ok) return await res.json();
                     if (res.status === 404) return null;
                 } catch (e) {}
@@ -2318,7 +2293,7 @@ function getTelegramInitData(){
                         const res = await fetch(`${API_URL}/api/register`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ username, nickname })
+                            body: JSON.stringify({ userId: tgUser.id, username, nickname })
                         });
                         const data = await res.json().catch(() => ({}));
                         if (res.ok && data && data.success) return data.user;
@@ -2330,7 +2305,7 @@ function getTelegramInitData(){
             return null;
         }
         function switchTab(tab) { document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); document.getElementById(`${tab}-tab`).classList.add('active'); event.target.classList.add('active'); if (tab === 'catalog') loadCatalog(); }
-        async function fetchCart() { if (!userData) return; try { const res = await fetch(`${API_URL}/api/me/cart`); cart = await res.json(); updateCartBadge(); if (document.getElementById('catalog-tab').classList.contains('active')) filterProducts(); } catch (e) {} }
+        async function fetchCart() { if (!userData) return; try { const res = await fetch(`${API_URL}/api/cart/${userData.telegram_id}`); cart = await res.json(); updateCartBadge(); if (document.getElementById('catalog-tab').classList.contains('active')) filterProducts(); } catch (e) {} }
         async function loadCatalog() { const container = document.getElementById('products-container'); if (cart.length === 0) await fetchCart(); if (products.length === 0) { try { const res = await fetch(`${API_URL}/api/products`); products = await res.json(); displayProducts(products); buildBrandFilter(); } catch (e) { container.innerHTML = '<p>Ошибка</p>'; } } else displayProducts(products); }
 
                 function escHtml(s){
@@ -2449,7 +2424,7 @@ function getManufacturerFromName(name){
                 const res = await fetch(`${API_URL}/api/cart/add`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId: id })
+                    body: JSON.stringify({ userId: userData.telegram_id, productId: id })
                 });
 
                 if (res.status === 409) {
@@ -2471,7 +2446,7 @@ function getManufacturerFromName(name){
             }
         }
         async function changeQtyFromCatalog(id, chg) { if (chg === 1) await addToCart(id); else await removeFromCart(id); }
-        async function removeFromCart(id, all = false) { try { await fetch(`${API_URL}/api/cart/remove`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ productId: id, removeAll: all }) }); await fetchCart(); if (document.getElementById('cart-modal').classList.contains('active')) openCart(); } catch (e) {} }
+        async function removeFromCart(id, all = false) { try { await fetch(`${API_URL}/api/cart/remove`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId: userData.telegram_id, productId: id, removeAll: all }) }); await fetchCart(); if (document.getElementById('cart-modal').classList.contains('active')) openCart(); } catch (e) {} }
         function calcCartSubtotal() {
             return cart.reduce((sum, i) => sum + (parseFloat(i.price) * i.quantity), 0);
         }
@@ -2673,7 +2648,7 @@ function getManufacturerFromName(name){
                     try { if (typeof loadCatalog === 'function') await loadCatalog(); } catch (e) {}
 
                     // refresh user points/profile data
-                    try { userData = await checkUserRegistration(); } catch (e) {}
+                    try { userData = await checkUserRegistration(userData.telegram_id); } catch (e) {}
                 } else {
                     const msg = document.getElementById('pickup-message');
                     const btn = document.getElementById('pickup-chat-btn');
@@ -2785,7 +2760,7 @@ async function openProfile() {
 
     try {
         // подстрахуемся: обновим данные пользователя (баллы могут измениться после заказа)
-        const fresh = await checkUserRegistration();
+        const fresh = await checkUserRegistration(userData.telegram_id);
         if (fresh) {
             userData = fresh;
             const nick2 = (userData.nickname || userData.name || '-');
@@ -2796,7 +2771,7 @@ async function openProfile() {
             document.getElementById('profile-points').textContent = (userData.points !== undefined && userData.points !== null) ? userData.points : 0;
         }
 
-        const res = await fetch(`${API_URL}/api/me/orders`);
+        const res = await fetch(`${API_URL}/api/user/${userData.telegram_id}/orders`);
         const orders = await res.json();
 
         if (!Array.isArray(orders) || orders.length === 0) {
@@ -2834,7 +2809,7 @@ async function openProfile() {
             const content = document.getElementById('od-content');
             content.innerHTML = 'Загрузка...';
             try {
-                const res = await fetch(`${API_URL}/api/me/orders`);
+                const res = await fetch(`${API_URL}/api/user/${userData.telegram_id}/orders`);
                 const orders = await res.json();
                 const o = (Array.isArray(orders) ? orders : []).find(x => x.id === orderId);
                 if (!o) { content.innerHTML = 'Заказ не найден'; return; }
