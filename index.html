@@ -2321,6 +2321,16 @@ color: var(--text-color);
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
+        async function pingBackend() {
+            try {
+                const res = await fetch(`${API_URL}/health`, { cache: 'no-store' });
+                return res.ok;
+            } catch (e) {
+                console.error('[PING] backend unreachable:', e);
+                return false;
+            }
+        }
+
         async function initApp() {
             try {
                 const initData = Telegram.WebApp.initDataUnsafe;
@@ -2328,6 +2338,10 @@ color: var(--text-color);
                 // const userId = 123456789; // Debug
                 if (!userId) { alert('Откройте в Telegram!'); return; }
                 Telegram.WebApp.expand();
+                // Quick connectivity check (helps diagnose CORS / network issues)
+                const backendOk = await pingBackend();
+                if (!backendOk) { alert('Нет соединения с сервером. Попробуйте снова.'); return; }
+
                 try {
                     const scheme = Telegram.WebApp.colorScheme;
                     if (scheme) document.documentElement.dataset.tgScheme = scheme;
@@ -2351,7 +2365,7 @@ color: var(--text-color);
                 try {
                     const saved = JSON.parse(localStorage.getItem('appliedPromo') || 'null');
                     if (saved && saved.code && saved.discount_percent) appliedPromo = saved;
-                } catch(e) {}
+                } catch(e) { console.warn('[API] upsertTelegramUser error', e); }
 
                 if (!userData) { alert('Не удалось загрузить профиль. Попробуйте снова.'); return; }
                 showMainScreen();
@@ -2367,7 +2381,7 @@ color: var(--text-color);
                     const res = await fetch(`${API_URL}/api/user/${userId}`);
                     if (res.ok) return await res.json();
                     if (res.status === 404) return null;
-                } catch (e) {}
+                } catch (e) { console.warn('[API] /api/user failed', e); }
                 await sleep(250 * (attempt + 1));
             }
             return null;
@@ -2404,7 +2418,7 @@ color: var(--text-color);
                         const data = await res.json().catch(() => ({}));
                         if (res.ok && data && data.success) return data.user;
                         // if server returned something unexpected, retry a bit
-                    } catch (e) {}
+                    } catch (e) { console.warn('[API] /api/register failed', e); }
                     await sleep(250 * (attempt + 1));
                 }
             } catch(e) {}
