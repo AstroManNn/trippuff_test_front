@@ -1740,6 +1740,91 @@ color: var(--text-color);
 
         /* Fix: keep fixed FABs truly fixed (avoid filter/transform containing block) */
         .screen{ filter: none !important; }
+
+        /* Product details modal */
+        .product-card{ cursor: pointer; }
+        .pd-hero{
+            width:100%;
+            height: 220px;
+            border-radius: 22px;
+            margin-bottom: 12px;
+            background: rgba(255,255,255,72);
+            border: 1px solid rgba(11,18,32,06);
+            overflow:hidden;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            position: relative;
+        }
+        :root[data-tg-scheme="dark"] .pd-hero{
+            background: rgba(255,255,255,06);
+            border-color: rgba(255,255,255,10);
+        }
+        .pd-hero img{
+            width:100%;
+            height:100%;
+            object-fit: contain;
+            padding: 10px;
+            transform: translateZ(0);
+        }
+        .pd-img-placeholder{
+            width:100%;
+            height:100%;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color: var(--secondary-color);
+            font-weight: 800;
+            letter-spacing: -.01em;
+        }
+        .pd-head{ margin-bottom: 10px; }
+        .pd-name{ font-weight: 900; font-size: 18px; line-height:1.2; margin-bottom: 6px; }
+        .pd-price{
+            font-weight: 950;
+            font-size: 22px;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, rgba(255,77,109,1), rgba(43,124,255,1));
+            -webkit-background-clip:text;
+            -webkit-text-fill-color: transparent;
+        }
+        .pd-meta{ font-size: 12.5px; color: var(--secondary-color); margin-bottom: 6px; }
+        .pd-stock{ font-size: 12.5px; color: var(--secondary-color); }
+        .pd-desc{
+            font-size: 13px;
+            line-height:1.45;
+            color: var(--text-color);
+            background: rgba(255,255,255,.35);
+            border:1px solid var(--border-color);
+            padding: 12px;
+            border-radius: 18px;
+        }
+        :root[data-tg-scheme="dark"] .pd-desc{ background: rgba(255,255,255,.06); }
+        .pd-actions{ margin-top: 12px; }
+        .pd-actions .add-to-cart-btn{ width:100%; }
+        .pd-actions .qty-control-catalog{ width:100%; justify-content:space-between; }
+
+        .pd-fly{
+            position: fixed;
+            z-index: 2005;
+            overflow:hidden;
+            pointer-events:none;
+            box-shadow: var(--shadow-lg);
+            will-change: transform;
+            transform-origin: top left;
+            background: rgba(255,255,255,72);
+            border: 1px solid rgba(11,18,32,06);
+        }
+        :root[data-tg-scheme="dark"] .pd-fly{
+            background: rgba(255,255,255,06);
+            border-color: rgba(255,255,255,10);
+        }
+        .pd-fly img{
+            width:100%; height:100%;
+            object-fit: contain;
+            padding: 10px;
+        }
+        #product-details-modal.pd-animating #pd-hero{ visibility: hidden; }
+
 </style>
 </head>
 <body>
@@ -1783,14 +1868,35 @@ color: var(--text-color);
         <div style="font-size:12px; color:#666; margin-top:10px;">Если кнопка не открывается — напишите @trippuff</div>
     </div></div>
 
+    <!-- PRODUCT DETAILS MODAL -->
+    <div id="product-details-modal" class="modal pd-modal">
+        <div class="modal-content pd-content">
+            <span class="close-btn" onclick="closeProductDetails()">&times;</span>
+            <div class="pd-hero" id="pd-hero">
+                <img id="pd-img" alt="" />
+                <div id="pd-img-placeholder" class="pd-img-placeholder">Фото</div>
+            </div>
+
+            <div class="pd-head">
+                <div class="pd-name" id="pd-name">-</div>
+                <div class="pd-price" id="pd-price">-</div>
+                <div class="pd-meta" id="pd-meta">-</div>
+                <div class="pd-stock" id="pd-stock" style="display:none;"></div>
+            </div>
+
+            <div class="pd-desc" id="pd-desc"></div>
+            <div class="pd-actions" id="pd-actions"></div>
+        </div>
+    </div>
+
+
     <!-- PROFILE MODAL -->
     <div id="profile-modal" class="modal"><div class="modal-content"><span class="close-btn" onclick="closeModal('profile-modal')">&times;</span>
         <h2>Профиль</h2>
         <div class="profile-card">
             <div style="font-weight:700; font-size:18px;" id="profile-name">-</div>
             <div style="color:#666;" id="profile-phone">-</div>
-            <div style="margin-top:10px; font-weight:600;"><span class="accent" id="profile-points">0</span></div>
-        </div>
+</div>
         <h3 class="section-title">История заказов</h3>
         <div id="profile-orders" class="orders-list">Загрузка...</div>
     </div></div>
@@ -2317,22 +2423,6 @@ color: var(--text-color);
                 .replace(/'/g,'&#39;');
         }
 
-        function formatDateTime(ts){
-            try {
-                const d = new Date(ts);
-                if (!ts || Number.isNaN(d.getTime())) return '';
-                return d.toLocaleString('ru-RU', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            } catch(e) {
-                return '';
-            }
-        }
-
 function getManufacturerFromName(name){
             const s = (name || '').toString().trim();
             if (!s) return '';
@@ -2418,8 +2508,243 @@ function getManufacturerFromName(name){
             }); 
             displayProducts(filtered); 
         }
-        function displayProducts(list) { const container = document.getElementById('products-container'); container.innerHTML = ''; if (list.length === 0) { container.innerHTML = '<div style="grid-column: 1/-1; text-align: center;">Пусто</div>'; return; } list.forEach(p => { const cartItem = cart.find(c => c.product_id === p.id); const hasStock = p.stock > 0; let buttonHtml = ''; if (!hasStock) buttonHtml = `<div class="out-of-stock">Нет в наличии</div>`; else if (cartItem) { buttonHtml = `<div class="qty-control-catalog"><button onclick="changeQtyFromCatalog(${p.id}, -1)">-</button><div style="text-align:center"><div class="in-cart-text">В корзине</div><span>${cartItem.quantity}</span></div><button onclick="changeQtyFromCatalog(${p.id}, 1)">+</button></div>`; } else buttonHtml = `<button class="add-to-cart-btn" onclick="addToCart(${p.id})">В корзину +</button>`; const el = document.createElement('div'); el.className = 'product-card'; el.innerHTML = `<div class="product-image">${p.image_url ? `<img src="${p.image_url}">` : 'Фото'}</div><div class="product-name">${p.name}</div><div class="product-price">${p.price} ₽</div><div class="product-description">${p.description}</div>${buttonHtml}`; container.appendChild(el); }); }
-        function updateCartBadge() { const count = cart.reduce((sum, item) => sum + item.quantity, 0); const badge = document.getElementById('cart-badge'); if (count > 0) { badge.style.display = 'flex'; badge.textContent = count; } else badge.style.display = 'none'; }
+        function displayProducts(list) {
+            const container = document.getElementById('products-container');
+            container.innerHTML = '';
+
+            if (!Array.isArray(list) || list.length === 0) {
+                container.innerHTML = '<div style="grid-column: 1/-1; text-align: center;">Пусто</div>';
+                return;
+            }
+
+            list.forEach(p => {
+                const cartItem = cart.find(c => c.product_id === p.id);
+                const hasStock = (parseInt(p.stock, 10) || 0) > 0;
+
+                let buttonHtml = '';
+                if (!hasStock) {
+                    buttonHtml = `<div class="out-of-stock" onclick="event.stopPropagation()">Нет в наличии</div>`;
+                } else if (cartItem) {
+                    buttonHtml = `
+                        <div class="qty-control-catalog" onclick="event.stopPropagation()">
+                            <button onclick="event.stopPropagation(); changeQtyFromCatalog(${p.id}, -1)">-</button>
+                            <div style="text-align:center">
+                                <div class="in-cart-text">В корзине</div>
+                                <span>${cartItem.quantity}</span>
+                            </div>
+                            <button onclick="event.stopPropagation(); changeQtyFromCatalog(${p.id}, 1)">+</button>
+                        </div>
+                    `;
+                } else {
+                    buttonHtml = `<button class="add-to-cart-btn" onclick="event.stopPropagation(); addToCart(${p.id})">В корзину +</button>`;
+                }
+
+                const el = document.createElement('div');
+                el.className = 'product-card';
+                el.setAttribute('role', 'button');
+                el.tabIndex = 0;
+
+                const imgHtml = p.image_url ? `<img src="${p.image_url}" alt="">` : 'Фото';
+
+                el.innerHTML = `
+                    <div class="product-image">${imgHtml}</div>
+                    <div class="product-name">${escHtml(p.name)}</div>
+                    <div class="product-price">${escHtml(p.price)} ₽</div>
+                    <div class="product-description">${escHtml(p.description || '')}</div>
+                    ${buttonHtml}
+                `;
+
+                el.addEventListener('click', (e) => {
+                    const t = e.target;
+                    if (t && (t.closest('button') || t.closest('.qty-control-catalog'))) return;
+                    openProductDetails(p.id, el);
+                });
+
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openProductDetails(p.id, el);
+                    }
+                });
+
+                container.appendChild(el);
+            });
+        }
+
+        // =========================
+        // Product details modal
+        // =========================
+        let pdOpenProductId = null;
+        let pdLastSourceEl = null;
+
+        function closeProductDetails(){
+            try{ pdOpenProductId = null; }catch(e){}
+            try{
+                const m = document.getElementById('product-details-modal');
+                if (m) m.classList.remove('pd-animating');
+            }catch(e){}
+            closeModal('product-details-modal');
+        }
+
+        function updateProductModalActions(){
+            if (!pdOpenProductId) return;
+            renderProductModal(pdOpenProductId, null, true);
+        }
+
+        function openProductDetails(productId, sourceCardEl){
+            renderProductModal(productId, sourceCardEl, false);
+        }
+
+        function renderProductModal(productId, sourceCardEl, silent){
+            const modal = document.getElementById('product-details-modal');
+            if (!modal) return;
+
+            const p = (products || []).find(x => x.id === productId);
+            if (!p) return;
+
+            pdOpenProductId = productId;
+            if (sourceCardEl) pdLastSourceEl = sourceCardEl;
+
+            const nameEl = document.getElementById('pd-name');
+            const priceEl = document.getElementById('pd-price');
+            const metaEl = document.getElementById('pd-meta');
+            const stockEl = document.getElementById('pd-stock');
+            const descEl = document.getElementById('pd-desc');
+            const actionsEl = document.getElementById('pd-actions');
+
+            const imgEl = document.getElementById('pd-img');
+            const phEl = document.getElementById('pd-img-placeholder');
+
+            if (nameEl) nameEl.textContent = (p.name || '').toString();
+            if (priceEl) priceEl.textContent = `${p.price} ₽`;
+
+            const brand = getProductBrand(p);
+            const cat = (p.category || 'Разное');
+            const metaParts = [cat];
+            if (brand) metaParts.push(brand);
+            if (metaEl) metaEl.textContent = metaParts.join(' • ');
+
+            // show stock only for admins (doesn't affect ordering logic)
+            try{
+                const stock = parseInt(p.stock, 10);
+                if (stockEl) {
+                    if (userData && userData.is_admin && Number.isFinite(stock)) {
+                        stockEl.style.display = 'block';
+                        stockEl.textContent = `Сток: ${stock} шт.`;
+                    } else {
+                        stockEl.style.display = 'none';
+                        stockEl.textContent = '';
+                    }
+                }
+            }catch(e){}
+
+            if (descEl) descEl.textContent = (p.description || '').toString();
+
+            const src = (p.image_url || '').toString().trim();
+            if (src) {
+                if (imgEl) {
+                    imgEl.src = src;
+                    imgEl.style.display = 'block';
+                }
+                if (phEl) phEl.style.display = 'none';
+            } else {
+                if (imgEl) {
+                    imgEl.removeAttribute('src');
+                    imgEl.style.display = 'none';
+                }
+                if (phEl) phEl.style.display = 'flex';
+            }
+
+            if (actionsEl) actionsEl.innerHTML = buildProductModalActionsHtml(p);
+
+            if (!silent) {
+                modal.classList.add('active');
+                try{
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => runProductHeroTransition(sourceCardEl || pdLastSourceEl, src));
+                    });
+                }catch(e){}
+            }
+        }
+
+        function buildProductModalActionsHtml(p){
+            const hasStock = (parseInt(p.stock, 10) || 0) > 0;
+            const cartItem = cart.find(c => c.product_id === p.id);
+
+            if (!hasStock) {
+                return `<div class="out-of-stock">Нет в наличии</div>`;
+            }
+
+            if (cartItem) {
+                return `
+                    <div class="qty-control-catalog" style="width:100%">
+                        <button onclick="changeQtyFromCatalog(${p.id}, -1)">-</button>
+                        <div style="text-align:center">
+                            <div class="in-cart-text">В корзине</div>
+                            <span>${cartItem.quantity}</span>
+                        </div>
+                        <button onclick="changeQtyFromCatalog(${p.id}, 1)">+</button>
+                    </div>
+                `;
+            }
+
+            return `<button class="add-to-cart-btn" onclick="addToCart(${p.id})">В корзину +</button>`;
+        }
+
+        function runProductHeroTransition(sourceCardEl, srcUrl){
+            try{
+                const modal = document.getElementById('product-details-modal');
+                if (!modal || !modal.classList.contains('active')) return;
+
+                const srcWrap = sourceCardEl ? sourceCardEl.querySelector('.product-image') : null;
+                const dstWrap = document.getElementById('pd-hero');
+                if (!srcWrap || !dstWrap) return;
+
+                const srcImg = srcWrap.querySelector('img');
+                const imgSrc = (srcImg && srcImg.getAttribute('src')) ? srcImg.getAttribute('src') : (srcUrl || '');
+                if (!imgSrc) return;
+
+                const srcRect = srcWrap.getBoundingClientRect();
+                const dstRect = dstWrap.getBoundingClientRect();
+                if (!srcRect.width || !srcRect.height || !dstRect.width || !dstRect.height) return;
+
+                const fly = document.createElement('div');
+                fly.className = 'pd-fly';
+                fly.style.left = `${srcRect.left}px`;
+                fly.style.top = `${srcRect.top}px`;
+                fly.style.width = `${srcRect.width}px`;
+                fly.style.height = `${srcRect.height}px`;
+                fly.style.borderRadius = getComputedStyle(srcWrap).borderRadius || '16px';
+
+                const img = document.createElement('img');
+                img.src = imgSrc;
+                img.alt = '';
+                fly.appendChild(img);
+                document.body.appendChild(fly);
+
+                // hide real hero while animating
+                modal.classList.add('pd-animating');
+
+                const dx = dstRect.left - srcRect.left;
+                const dy = dstRect.top - srcRect.top;
+                const sx = dstRect.width / srcRect.width;
+                const sy = dstRect.height / srcRect.height;
+
+                const anim = fly.animate([
+                    { transform: 'translate(0px, 0px) scale(1, 1)', borderRadius: fly.style.borderRadius },
+                    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: '22px' }
+                ], { duration: 520, easing: 'cubic-bezier(0.2, 1, 0.3, 1)' });
+
+                const finish = () => {
+                    try{ fly.remove(); }catch(e){}
+                    try{ modal.classList.remove('pd-animating'); }catch(e){}
+                };
+
+                anim.onfinish = finish;
+                anim.oncancel = finish;
+            } catch(e) {}
+        }
+function updateCartBadge() { const count = cart.reduce((sum, item) => sum + item.quantity, 0); const badge = document.getElementById('cart-badge'); if (count > 0) { badge.style.display = 'flex'; badge.textContent = count; } else badge.style.display = 'none'; }
         async function addToCart(id) {
             try { if (window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback) Telegram.WebApp.HapticFeedback.impactOccurred('light'); } catch(e) {}
 
@@ -2715,7 +3040,20 @@ function getManufacturerFromName(name){
             window.open(url, '_blank');
         }
 
-        function closeModal(id) { document.getElementById(id).classList.remove('active'); if (id === 'admin-modal') { try{ closeAdminDrawer(); }catch(e){} } }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); if (id === 'admin-modal') { try{ closeAdmasync function fetchCart() {
+            if (!userData) return;
+            try {
+                const res = await fetch(`${API_URL}/api/cart/${userData.telegram_id}`);
+                cart = await res.json();
+                updateCartBadge();
+
+                // If product modal is open — sync qty controls inside it
+                try { updateProductModalActions(); } catch(e) {}
+
+                if (document.getElementById('catalog-tab').classList.contains('active')) filterProducts();
+            } catch (e) {}
+        }
+        async function loadCatalog }
         async function openFAQ() {
             document.getElementById('faq-modal').classList.add('active');
             const content = document.getElementById('faq-content');
@@ -2768,8 +3106,6 @@ async function openProfile() {
     const uname = rawUsername ? ('@' + rawUsername) : '-';
     document.getElementById('profile-name').textContent = nick;
     document.getElementById('profile-phone').textContent = uname;
-    document.getElementById('profile-points').textContent = (userData.points !== undefined && userData.points !== null) ? userData.points : 0;
-
     // история заказов
     const list = document.getElementById('profile-orders');
     list.innerHTML = '<div class="loading">Загрузка...</div>';
@@ -2784,7 +3120,6 @@ async function openProfile() {
             const uname2 = rawUsername2 ? ('@' + rawUsername2) : '-';
             document.getElementById('profile-name').textContent = nick2;
             document.getElementById('profile-phone').textContent = uname2;
-            document.getElementById('profile-points').textContent = (userData.points !== undefined && userData.points !== null) ? userData.points : 0;
         }
 
         const res = await fetch(`${API_URL}/api/user/${userData.telegram_id}/orders`);
@@ -2796,13 +3131,9 @@ async function openProfile() {
         }
 
         list.innerHTML = orders.map(o => {
-            const date = formatDateTime(o.created_at);
+            const date = new Date(o.created_at).toLocaleDateString('ru-RU');
             const items = (o.items || []).map(i => `${i.name} x${i.quantity}`).join(', ');
-            const statusText = (o.status === 'completed')
-                ? '✅ Выполнен'
-                : (o.status === 'pending' ? '⏳ Ожидает подтверждения' : '🕒 В обработке');
-            const earned = (o.status === 'completed') ? ((o.points_awarded !== undefined && o.points_awarded !== null) ? o.points_awarded : 0) : null;
-            const earnedLine = (earned !== null) ? `<div style="margin-top:6px; font-size:12px; color:#666;">⭐️ Начислено: <b>${earned}</b></div>` : '';
+            const statusText = (o.status === 'completed') ? '✅ Выполнен' : '🕒 В обработке';
             return `
                 <div class="admin-order" onclick="openOrderDetails(${o.id})" style="cursor:pointer;">
                     <div style="display:flex; justify-content:space-between; gap:10px;">
@@ -2810,7 +3141,6 @@ async function openProfile() {
                         <span style="font-size:12px;">${date}</span>
                     </div>
                     <div style="margin-top:6px; font-size:13px; color:#666;">${statusText}</div>
-                    ${earnedLine}
                     <div style="margin-top:8px; color:#444; font-size:13px;">${items || '—'}</div>
                     <div style="margin-top:10px; font-weight:800;">Итого: ${o.total_price} ₽</div>
                 </div>
@@ -4049,36 +4379,22 @@ async function openProfile() {
                         const desc = escHtml((i.description || '').toString().trim());
                         return desc ? `${name} x${qty} <span style=\"color:#777;\">— ${desc}</span>` : `${name} x${qty}`;
                     }).join('<br>');
-                    const date = formatDateTime(o.created_at);
+                    const date = new Date(o.created_at).toLocaleDateString('ru-RU');
                     const nick = (o.user_data?.nickname || o.user_data?.name || '-');
                     const rawU = (o.user_data?.username || '').toString().trim().replace(/^@/, '');
                     const uHtml = rawU ? `(<a href="https://t.me/${rawU}" target="_blank">@${rawU}</a>)` : '';
                     const promoLine = o.promo_code ? `<div style="margin-top:5px; font-size:13px; color:#666;">🎟 Промокод: <b>${o.promo_code}</b> (-${o.promo_discount_percent}%)</div>` : '';
                     const pointsLine = (o.points_spent && parseInt(o.points_spent) > 0) ? `<div style="margin-top:5px; font-size:13px; color:#666;">⭐️ Списано баллов: <b>${o.points_spent}</b></div>` : '';
-                    const earnedLine = (o.status === 'completed') ? `<div style=\"margin-top:6px; font-size:13px; color:#666;\">⭐️ Начислено баллов: <b>${(o.points_awarded !== undefined && o.points_awarded !== null) ? o.points_awarded : 0}</b></div>` : '';
-                    
                     let buttons = '';
                     if (status === 'active') {
                         const itemsJson = encodeURIComponent(JSON.stringify(o.items));
-                        const addrJs = (o.address == null ? '' : String(o.address)).replace(/\\/g,'\\\\').replace(/'/g, "\\'").replace(/\n/g,' ');
-                        const cmtJs = (o.comment == null ? '' : String(o.comment)).replace(/\\/g,'\\\\').replace(/'/g, "\\'").replace(/\n/g,' ');
-                        const editBtn = `
+                        buttons = `
                             <button class="btn-primary btn-danger" style="margin-top: 5px; padding: 8px;" 
-                                onclick="editOrder(${o.id}, '${addrJs}', '${cmtJs}', '${itemsJson}', ${o.total_price})">
+                                onclick="editOrder(${o.id}, '${o.address.replace(/\n/g,' ')}', '${(o.comment||'').replace(/\n/g,' ')}', '${itemsJson}', ${o.total_price})">
                                 Редактировать
                             </button>
+                            <button class="btn-green" style="margin-top:5px; padding:10px; width:100%; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="completeOrder(${o.id})">✅ Выполнено</button>
                         `;
-                        if (o.status === 'pending') {
-                            buttons = `
-                                ${editBtn}
-                                <button class="btn-green" style="margin-top:5px; padding:10px; width:100%; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="acceptOrder(${o.id})">✅ Принять</button>
-                            `;
-                        } else {
-                            buttons = `
-                                ${editBtn}
-                                <button class="btn-green" style="margin-top:5px; padding:10px; width:100%; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="completeOrder(${o.id})">✅ Выполнено</button>
-                            `;
-                        }
                     }
 
                     return `
@@ -4088,7 +4404,7 @@ async function openProfile() {
                             <div style="margin-top:5px; color:#444;">${items}</div>
                             <div style="margin-top:5px; font-weight:bold;">Итого: ${o.total_price} ₽</div>
                             ${promoLine}
-                            ${pointsLine}${earnedLine}
+                            ${pointsLine}
                             <div style="margin-top:5px; background: color-mix(in srgb, var(--card-bg) 92%, transparent); padding:10px 10px; border:1px solid var(--border-color); border-radius:14px; font-size:14px; color: var(--text-color);">📍 ${o.address}</div>
                             <div style="margin-top:5px; font-size:13px; color:#666;">💬 ${o.comment || '-'}</div>
                             ${buttons}
@@ -4096,35 +4412,6 @@ async function openProfile() {
                     `;
                 }).join('');
             } catch(e) { container.innerHTML = 'Ошибка'; console.error(e); }
-        }
-
-        async function acceptOrder(id) {
-            if(!confirm('Принять заказ и списать товар со склада?')) return;
-            try {
-                const res = await fetch(`${API_URL}/api/admin/order/${id}/accept`, {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ userId: userData.telegram_id })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    if (data && data.error === 'OUT_OF_STOCK' && Array.isArray(data.items)) {
-                        const lines = data.items.map(it => {
-                            const nm = (it.name || it.product_id || 'товар');
-                            return `${nm}: нужно ${it.requested}, есть ${it.stock}`;
-                        }).join('\n');
-                        alert('Нельзя принять заказ — не хватает товара на складе:\n' + lines);
-                    } else {
-                        alert((data && data.error) ? data.error : 'Ошибка принятия заказа');
-                    }
-                    return;
-                }
-                alert('Заказ принят ✅');
-                await refreshProductsFromServer();
-                loadAdminOrders('active');
-            } catch(e) {
-                alert('Ошибка сети');
-            }
         }
 
         async function completeOrder(id) {
@@ -4378,7 +4665,7 @@ async function openProfile() {
             }
 
             // --- Hide FABs when any modal is open (admin/cart/faq/profile/etc.) ---
-            const MODAL_IDS = ['faq-modal','cart-modal','age-warning-modal','address-modal','profile-modal','order-details-modal','admin-modal','edit-order-modal','db-edit-modal','edit-product-modal','photo-wizard-modal'];
+            const MODAL_IDS = ['faq-modal','cart-modal','product-details-modal','age-warning-modal','address-modal','profile-modal','order-details-modal','admin-modal','edit-order-modal','db-edit-modal','edit-product-modal','photo-wizard-modal'];
             const modals = MODAL_IDS.map(id => document.getElementById(id)).filter(Boolean);
 
             function modalIsVisible(el){
@@ -4405,7 +4692,7 @@ async function openProfile() {
                         return r;
                     };
                 };
-                ['closeModal','openCart','openFAQ','openProfile','openOrderDetails','openAdminPanel','showAddressForm','startCheckout'].forEach(wrapFn);
+                ['closeModal','openCart','openFAQ','openProfile','openOrderDetails','openAdminPanel','showAddressForm','startCheckout','openProductDetails','closeProductDetails'].forEach(wrapFn);
 
                 // Attribute observers on all modals
                 try{
