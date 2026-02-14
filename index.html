@@ -2309,6 +2309,44 @@ color: var(--text-color);
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
         const API_URL = 'https://trippufftestback-production-67a0.up.railway.app' 
+        const APP_BUILD = '2026-02-15-v14';
+        (function(){
+            // Fire-and-forget beacon so Railway logs prove THIS frontend build is really loaded inside Telegram.
+            try {
+                const img = new Image();
+                img.src = `${API_URL}/__ping.gif?b=${encodeURIComponent(APP_BUILD)}&ts=${Date.now()}`;
+            } catch(e) {}
+            // Try a real fetch (helps detect CORS / blocked requests).
+            try {
+                fetch(`${API_URL}/health`, { method: 'GET', cache: 'no-store', mode: 'cors' })
+                    .then(r => r.json().catch(() => null))
+                    .then(() => console.log('✅ [BACKEND] /health ok', APP_BUILD))
+                    .catch(err => console.warn('❌ [BACKEND] /health failed', APP_BUILD, err));
+            } catch(e) {}
+        })();
+
+        // Minimal on-page error overlay (visible only if JS errors happen inside Telegram WebView)
+        (function(){
+            const mount = (el) => {
+                const root = document.body || document.documentElement;
+                if (root && el && !el.parentNode) root.appendChild(el);
+            };
+            const show = (title, msg) => {
+                try {
+                    let box = document.getElementById('__err_overlay');
+                    if(!box){
+                        box = document.createElement('div');
+                        box.id = '__err_overlay';
+                        box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:10px 12px;border-radius:12px;font:12px/1.35 system-ui;-webkit-font-smoothing:antialiased;';
+                        mount(box);
+                    }
+                    box.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">${title}</div><div style="white-space:pre-wrap;">${String(msg).slice(0,800)}</div>`;
+                } catch(e) {}
+            };
+            window.addEventListener('error', (e) => show('JS error', (e && (e.message || (e.error && e.error.message) || e.error)) || 'unknown'));
+            window.addEventListener('unhandledrejection', (e) => show('Promise rejection', (e && e.reason) || 'unknown'));
+        })();
+
         let userData = null, products = [], cart = [], currentCategory = 'all', currentBrand = 'all';
         let lastPickupChatUrl = null; // deep link to @trippuff with prefilled order text
 
@@ -2321,27 +2359,19 @@ color: var(--text-color);
 
         function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-        async function pingBackend() {
-            try {
-                const res = await fetch(`${API_URL}/health`, { cache: 'no-store' });
-                return res.ok;
-            } catch (e) {
-                console.error('[PING] backend unreachable:', e);
-                return false;
-            }
-        }
-
         async function initApp() {
             try {
                 const initData = Telegram.WebApp.initDataUnsafe;
                 const userId = initData?.user?.id;
+                // Stage beacon: confirms whether Telegram userId is available inside this WebView build.
+                try {
+                    const img2 = new Image();
+                    const stage = userId ? 'has_user' : 'no_user';
+                    img2.src = `${API_URL}/__ping.gif?b=${encodeURIComponent(APP_BUILD)}&stage=${stage}&uid=${encodeURIComponent(userId || '')}&ts=${Date.now()}`;
+                } catch(e) {}
                 // const userId = 123456789; // Debug
                 if (!userId) { alert('Откройте в Telegram!'); return; }
                 Telegram.WebApp.expand();
-                // Quick connectivity check (helps diagnose CORS / network issues)
-                const backendOk = await pingBackend();
-                if (!backendOk) { alert('Нет соединения с сервером. Попробуйте снова.'); return; }
-
                 try {
                     const scheme = Telegram.WebApp.colorScheme;
                     if (scheme) document.documentElement.dataset.tgScheme = scheme;
@@ -2365,7 +2395,7 @@ color: var(--text-color);
                 try {
                     const saved = JSON.parse(localStorage.getItem('appliedPromo') || 'null');
                     if (saved && saved.code && saved.discount_percent) appliedPromo = saved;
-                } catch(e) { console.warn('[API] upsertTelegramUser error', e); }
+                } catch(e) {}
 
                 if (!userData) { alert('Не удалось загрузить профиль. Попробуйте снова.'); return; }
                 showMainScreen();
@@ -2381,7 +2411,7 @@ color: var(--text-color);
                     const res = await fetch(`${API_URL}/api/user/${userId}`);
                     if (res.ok) return await res.json();
                     if (res.status === 404) return null;
-                } catch (e) { console.warn('[API] /api/user failed', e); }
+                } catch (e) {}
                 await sleep(250 * (attempt + 1));
             }
             return null;
@@ -2418,7 +2448,7 @@ color: var(--text-color);
                         const data = await res.json().catch(() => ({}));
                         if (res.ok && data && data.success) return data.user;
                         // if server returned something unexpected, retry a bit
-                    } catch (e) { console.warn('[API] /api/register failed', e); }
+                    } catch (e) {}
                     await sleep(250 * (attempt + 1));
                 }
             } catch(e) {}
